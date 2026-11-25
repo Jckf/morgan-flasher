@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Morgan Flasher</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --text: #1c1f24; --muted: #6b7280;
+    --border: #d9dde3; --accent: #e7352c; --accent-text: #fff;
+    --ok: #15803d; --err: #b91c1c; --log-bg: #0f1115; --log-text: #d1d5db;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111317; --panel: #1a1d23; --text: #e5e7eb; --muted: #9ca3af;
+      --border: #2d323b; --log-bg: #0b0c0f;
+      --ok: #4ade80; --err: #f87171;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  section {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px; margin-bottom: 16px;
+  }
+  h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em;
+       color: var(--muted); margin: 0 0 12px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  label { display: inline-flex; gap: 6px; align-items: center; }
+  select, input[type=text] {
+    font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+  }
+  input.addr { width: 110px; font-family: ui-monospace, monospace; }
+  button {
+    font: inherit; border: 1px solid var(--border); background: var(--bg);
+    color: var(--text); border-radius: 6px; padding: 7px 14px; cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .files { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+  .file-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .file-row input[type=file] { flex: 1; min-width: 180px; }
+  .file-row .size { color: var(--muted); font-size: .85rem; min-width: 70px; }
+  .status { font-weight: 600; }
+  .status.ok { color: var(--ok); } .status.err { color: var(--err); }
+  .hint { color: var(--muted); font-size: .85rem; margin: 8px 0 0; }
+  progress { width: 100%; height: 14px; accent-color: var(--accent); }
+  #progressText { color: var(--muted); font-size: .85rem; margin-top: 4px; min-height: 1.2em; }
+  #log {
+    background: var(--log-bg); color: var(--log-text); border-radius: 8px;
+    padding: 10px; height: 260px; overflow: auto; margin: 0;
+    font: 12px/1.4 ui-monospace, "SFMono-Regular", Menlo, monospace; white-space: pre-wrap;
+  }
+  #unsupported { display: none; border-color: var(--err); color: var(--err); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Morgan Flasher</h1>
+  <p class="sub">Write binary firmware images to ESP32-S3 (N8R8 / N16R8 etc.) over Web Serial.</p>
+
+  <section id="unsupported">
+    Web Serial is not available in this browser. Use Chrome, Edge or Opera on desktop,
+    and open the page from <code>https://</code> or <code>http://localhost</code>.
+  </section>
+
+  <section>
+    <h2>Device</h2>
+    <div class="row">
+      <label>Baud
+        <select id="baud">
+          <option>115200</option><option>230400</option><option>460800</option>
+          <option selected>921600</option><option>1500000</option><option>2000000</option>
+        </select>
+      </label>
+      <button id="connectBtn" class="primary">Connect</button>
+      <button id="disconnectBtn" disabled>Disconnect</button>
+      <button id="resetBtn" disabled>Reset device</button>
+    </div>
+    <p class="hint">Status: <span id="status" class="status">Not connected</span></p>
+    <p class="hint">If the board doesn't enter the bootloader automatically, hold <b>BOOT</b>, tap <b>RST</b>, release <b>BOOT</b>, then connect.</p>
+  </section>
+
+  <section id="presetSection" hidden>
+    <h2>Bundled firmware</h2>
+    <div class="row">
+      <select id="presetSelect" style="flex:1;min-width:220px"></select>
+      <select id="presetMode"></select>
+      <button id="loadPresetBtn">Load</button>
+    </div>
+    <p class="hint" id="presetDesc"></p>
+  </section>
+
+  <section>
+    <h2>Firmware</h2>
+    <div class="files" id="files"></div>
+    <div class="row">
+      <button id="addFileBtn">+ Add image</button>
+      <label><input type="checkbox" id="eraseAll"> Erase entire flash first</label>
+    </div>
+    <p class="hint">
+      A merged/factory image goes at <code>0x0</code>. For separate parts on ESP32-S3:
+      bootloader <code>0x0</code>, partition table <code>0x8000</code>, app <code>0x10000</code>.
+    </p>
+  </section>
+
+  <section>
+    <h2>Flash</h2>
+    <div class="row" style="margin-bottom:12px">
+      <button id="flashBtn" class="primary" disabled>Flash</button>
+      <button id="eraseBtn" disabled>Erase flash only</button>
+    </div>
+    <progress id="progress" value="0" max="100"></progress>
+    <div id="progressText"></div>
+  </section>
+
+  <section>
+    <div class="row" style="justify-content:space-between;margin-bottom:8px">
+      <h2 style="margin:0">Log</h2>
+      <button id="clearLogBtn">Clear</button>
+    </div>
+    <pre id="log"></pre>
+  </section>
+</main>
+
+<script type="module">
+import { ESPLoader, Transport } from "https://cdn.jsdelivr.net/npm/esptool-js@0.7.1/bundle.js";
+
+const $ = (id) => document.getElementById(id);
+const logEl = $("log");
+
+let transport = null;
+let loader = null;
+let chipName = null;
+let busy = false;
+
+// ---------- logging ----------
+function log(text, newline = true) {
+  logEl.textContent += text + (newline ? "\n" : "");
+  logEl.scrollTop = logEl.scrollHeight;
+}
+const terminal = {
+  clean: () => { logEl.textContent = ""; },
+  writeLine: (d) => log(d),
+  write: (d) => log(d, false),
+};
+
+function setStatus(text, cls = "") {
+  $("status").textContent = text;
+  $("status").className = "status " + cls;
+}
+
+function updateButtons() {
+  const connected = !!loader;
+  $("connectBtn").disabled = connected || busy;
+  $("disconnectBtn").disabled = !connected || busy;
+  $("resetBtn").disabled = !connected || busy;
+  $("eraseBtn").disabled = !connected || busy;
+  $("flashBtn").disabled = !connected || busy || !getImages().length;
+  $("baud").disabled = connected;
+}
+
+// ---------- file rows ----------
+function addFileRow(address = "0x0", preloaded = null) {
+  const row = document.createElement("div");
+  row.className = "file-row";
+  row.innerHTML = `
+    <input type="text" class="addr" value="${address}" title="Flash address (hex)">
+    <input type="file" accept=".bin,application/octet-stream">
+    <span class="size"></span>
+    <button title="Remove">✕</button>`;
+  const fileInput = row.querySelector("input[type=file]");
+  if (preloaded) {
+    const name = document.createElement("span");
+    name.className = "fname";
+    name.style.cssText = "flex:1;min-width:180px;font-family:ui-monospace,monospace;font-size:.85rem;overflow-wrap:anywhere";
+    name.textContent = preloaded.name;
+    fileInput.replaceWith(name);
+    row._data = preloaded.data;
+    row.querySelector(".size").textContent = formatBytes(preloaded.data.length);
+  }
+  fileInput.addEventListener("change", async () => {
+    const f = fileInput.files[0];
+    row._data = f ? new Uint8Array(await f.arrayBuffer()) : null;
+    row.querySelector(".size").textContent = f ? formatBytes(f.size) : "";
+    updateButtons();
+  });
+  row.querySelector("button").addEventListener("click", () => {
+    row.remove();
+    if (!$("files").children.length) addFileRow();
+    updateButtons();
+  });
+  $("files").appendChild(row);
+}
+
+function getImages() {
+  return [...$("files").children]
+    .filter((r) => r._data && r._data.length)
+    .map((r) => ({ row: r, data: r._data, addrText: r.querySelector(".addr").value.trim() }));
+}
+
+function parseAddress(s) {
+  if (!/^(0x[0-9a-f]+|\d+)$/i.test(s)) return NaN;
+  return Number(s);
+}
+
+function formatBytes(n) {
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1024 / 1024).toFixed(2) + " MB";
+}
+
+// ---------- MD5 (used by esptool-js to verify written data) ----------
+function md5(bytes) {
+  const S = [7,12,17,22,7,12,17,22,7,12,17,22,7,12,17,22,5,9,14,20,5,9,14,20,5,9,14,20,5,9,14,20,
+             4,11,16,23,4,11,16,23,4,11,16,23,4,11,16,23,6,10,15,21,6,10,15,21,6,10,15,21,6,10,15,21];
+  const K = new Uint32Array(64);
+  for (let i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 2 ** 32);
+  const len = bytes.length;
+  const buf = new Uint8Array((((len + 8) >>> 6) + 1) * 64);
+  buf.set(bytes); buf[len] = 0x80;
+  const dv = new DataView(buf.buffer);
+  dv.setUint32(buf.length - 8, (len * 8) >>> 0, true);
+  dv.setUint32(buf.length - 4, Math.floor(len / 0x20000000), true);
+  let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+  for (let off = 0; off < buf.length; off += 64) {
+    let A = a0, B = b0, C = c0, D = d0;
+    for (let i = 0; i < 64; i++) {
+      let F, g;
+      if (i < 16) { F = (B & C) | (~B & D); g = i; }
+      else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) % 16; }
+      else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) % 16; }
+      else { F = C ^ (B | ~D); g = (7 * i) % 16; }
+      F = (F + A + K[i] + dv.getUint32(off + g * 4, true)) >>> 0;
+      A = D; D = C; C = B;
+      B = (B + ((F << S[i]) | (F >>> (32 - S[i])))) >>> 0;
+    }
+    a0 = (a0 + A) >>> 0; b0 = (b0 + B) >>> 0; c0 = (c0 + C) >>> 0; d0 = (d0 + D) >>> 0;
+  }
+  return [a0, b0, c0, d0]
+    .map((x) => [0, 8, 16, 24].map((s) => ((x >>> s) & 255).toString(16).padStart(2, "0")).join(""))
+    .join("");
+}
+
+// ---------- actions ----------
+async function withBusy(fn) {
+  busy = true; updateButtons();
+  try { await fn(); }
+  catch (e) { log("ERROR: " + (e?.message || e)); setStatus("Error: " + (e?.message || e), "err"); }
+  finally { busy = false; updateButtons(); }
+}
+
+async function connect() {
+  await withBusy(async () => {
+    const port = await navigator.serial.requestPort({});
+    transport = new Transport(port, false);
+    loader = new ESPLoader({
+      transport,
+      baudrate: Number($("baud").value),
+      romBaudrate: 115200,
+      terminal,
+      debugLogging: false,
+    });
+    setStatus("Connecting…");
+    try {
+      chipName = await loader.main();
+    } catch (e) {
+      await cleanup();
+      throw e;
+    }
+    if (!/ESP32-S3/i.test(chipName)) {
+      setStatus(`Connected: ${chipName} (not an ESP32-S3!)`, "err");
+      log(`WARNING: detected ${chipName}, this tool is intended for ESP32-S3.`);
+    } else {
+      setStatus(`Connected: ${chipName}`, "ok");
+    }
+  });
+}
+
+async function cleanup() {
+  try { if (transport) await transport.disconnect(); } catch {}
+  transport = null; loader = null; chipName = null;
+}
+
+async function disconnect() {
+  await withBusy(async () => {
+    await cleanup();
+    setStatus("Not connected");
+    log("Disconnected.");
+  });
+}
+
+async function resetDevice() {
+  await withBusy(async () => {
+    await loader.after("hard_reset");
+    log("Device reset. Disconnecting so the app can run.");
+    await cleanup();
+    setStatus("Not connected");
+  });
+}
+
+async function eraseOnly() {
+  if (!confirm("Erase the ENTIRE flash? This can take up to a minute.")) return;
+  await withBusy(async () => {
+    setStatus("Erasing flash…");
+    $("progress").removeAttribute("value");
+    $("progressText").textContent = "Erasing…";
+    const t0 = performance.now();
+    await loader.eraseFlash();
+    $("progress").value = 100;
+    $("progressText").textContent = `Erased in ${((performance.now() - t0) / 1000).toFixed(1)} s`;
+    setStatus(`Connected: ${chipName} — flash erased`, "ok");
+  });
+}
+
+async function flash() {
+  const images = getImages();
+  if (!images.length) return;
+  for (const img of images) {
+    img.address = parseAddress(img.addrText);
+    if (Number.isNaN(img.address)) {
+      alert(`Invalid address "${img.addrText}". Use hex like 0x10000.`);
+      return;
+    }
+  }
+  images.sort((a, b) => a.address - b.address);
+  for (let i = 1; i < images.length; i++) {
+    const prev = images[i - 1];
+    if (prev.address + prev.data.length > images[i].address) {
+      alert(`Image at 0x${prev.address.toString(16)} overlaps image at 0x${images[i].address.toString(16)}.`);
+      return;
+    }
+  }
+
+  await withBusy(async () => {
+    const total = images.reduce((s, i) => s + i.data.length, 0);
+    const t0 = performance.now();
+    setStatus("Flashing…");
+    $("progress").value = 0;
+    $("progressText").textContent = "";
+
+    await loader.writeFlash({
+      fileArray: images.map((i) => ({ data: i.data, address: i.address })),
+      flashMode: "keep",
+      flashFreq: "keep",
+      flashSize: "keep",
+      eraseAll: $("eraseAll").checked,
+      compress: true,
+      reportProgress: (fileIndex, written, size) => {
+        const pct = size ? (written / size) * 100 : 100;
+        $("progress").value = pct;
+        $("progressText").textContent =
+          `Image ${fileIndex + 1}/${images.length} @ 0x${images[fileIndex].address.toString(16)}: ${pct.toFixed(0)}%`;
+      },
+      calculateMD5Hash: md5,
+    });
+
+    const secs = (performance.now() - t0) / 1000;
+    $("progress").value = 100;
+    $("progressText").textContent = `Done: ${formatBytes(total)} written and verified in ${secs.toFixed(1)} s`;
+    log("Resetting device…");
+    await loader.after("hard_reset");
+    await cleanup();
+    setStatus("Flashed successfully — device reset", "ok");
+  });
+}
+
+// ---------- init ----------
+if (!("serial" in navigator)) {
+  $("unsupported").style.display = "block";
+  $("connectBtn").disabled = true;
+}
+navigator.serial?.addEventListener("disconnect", () => {
+  if (loader && !busy) { transport = null; loader = null; setStatus("Device unplugged"); updateButtons(); }
+});
+
+$("connectBtn").onclick = connect;
+$("disconnectBtn").onclick = disconnect;
+$("resetBtn").onclick = resetDevice;
+$("eraseBtn").onclick = eraseOnly;
+$("flashBtn").onclick = flash;
+$("addFileBtn").onclick = () => { addFileRow("0x10000"); updateButtons(); };
+$("clearLogBtn").onclick = () => terminal.clean();
+
+// ---------- bundled presets (firmware/manifest.json) ----------
+let presets = [];
+
+function currentPreset() { return presets[$("presetSelect").selectedIndex]; }
+
+function renderPresetModes() {
+  const p = currentPreset();
+  $("presetMode").innerHTML = "";
+  for (const [key, m] of Object.entries(p.modes)) {
+    $("presetMode").add(new Option(m.label, key));
+  }
+  renderPresetDesc();
+}
+
+function renderPresetDesc() {
+  const p = currentPreset();
+  const m = p.modes[$("presetMode").value];
+  $("presetDesc").textContent = [p.description, m?.description].filter(Boolean).join(" ");
+}
+
+async function loadPreset() {
+  const p = currentPreset();
+  const m = p.modes[$("presetMode").value];
+  $("loadPresetBtn").disabled = true;
+  try {
+    log(`Loading preset: ${p.name} (${m.label})`);
+    const loaded = [];
+    for (const f of m.files) {
+      const res = await fetch(new URL(f.path, new URL("firmware/", location.href)));
+      if (!res.ok) throw new Error(`${f.path}: HTTP ${res.status}`);
+      const data = new Uint8Array(await res.arrayBuffer());
+      if (f.md5 && md5(data) !== f.md5) throw new Error(`${f.path}: MD5 mismatch, the file is corrupt or out of date`);
+      log(`  ${f.address}  ${f.path}  (${formatBytes(data.length)})`);
+      loaded.push({ address: f.address, name: f.path.split("/").pop(), data });
+    }
+    $("files").innerHTML = "";
+    for (const l of loaded) addFileRow(l.address, l);
+    $("eraseAll").checked = !!m.eraseAll;
+  } catch (e) {
+    log("ERROR loading preset: " + (e?.message || e));
+  } finally {
+    $("loadPresetBtn").disabled = false;
+    updateButtons();
+  }
+}
+
+async function initPresets() {
+  try {
+    const res = await fetch("firmware/manifest.json", { cache: "no-cache" });
+    if (!res.ok) return;
+    presets = (await res.json()).presets || [];
+  } catch { return; }
+  if (!presets.length) return;
+  for (const p of presets) $("presetSelect").add(new Option(p.name));
+  $("presetSelect").onchange = renderPresetModes;
+  $("presetMode").onchange = renderPresetDesc;
+  $("loadPresetBtn").onclick = loadPreset;
+  renderPresetModes();
+  $("presetSection").hidden = false;
+}
+
+addFileRow("0x0");
+updateButtons();
+initPresets();
+if ("serial" in navigator) $("connectBtn").disabled = false;
+</script>
+</body>
+</html>
