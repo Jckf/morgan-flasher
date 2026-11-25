@@ -1,0 +1,45 @@
+{
+  "presets": [
+    {
+      "id": "heltec-v4-r8-tft-jpl-freqfix",
+      "name": "Meshtastic 2.8.3.7aba92f · Heltec V4 R8 TFT · 30 dBm + narrow freq fix",
+      "description": "Unofficial build: EU power limit raised to 30 dBm, plus meshtastic/firmware#11559 and meshtastic/device-ui#502 (correct displayed frequency on narrow presets).",
+      "modes": {
+        "install": {
+          "label": "Full install (erases flash)",
+          "description": "Wipes the device, including settings and keys.",
+          "eraseAll": true,
+          "files": [
+            {
+              "path": "firmware-heltec-v4-r8-tft-2.8.3.7aba92f.factory.bin",
+              "address": "0x0",
+              "md5": "7186f14f66bedd571a7862f5c02f390a"
+            },
+            {
+              "path": "mt-esp32s3-ota.bin",
+              "address": "0x650000",
+              "md5": "497d3108c038f8a6b5f4e234a1156c8a"
+            },
+            {
+              "path": "littlefs-heltec-v4-r8-tft-2.8.3.7aba92f.bin",
+              "address": "0xc90000",
+              "md5": "49a5b49e04490acbf99d334ab783ce17"
+            }
+          ]
+        },
+        "update": {
+          "label": "Update (keeps settings)",
+          "description": "Writes only the app to 0x10000. The device must already run Meshtastic 2.8 with the 16MB partition layout.",
+          "eraseAll": false,
+          "files": [
+            {
+              "path": "firmware-heltec-v4-r8-tft-2.8.3.7aba92f.bin",
+              "address": "0x10000",
+              "md5": "43ed083e1224b992ed546763a13b9505"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
